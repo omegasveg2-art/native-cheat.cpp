@@ -1,0 +1,39 @@
+name: build
+on:
+  workflow_dispatch:
+  push:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: unzip project
+        run: unzip -q scarlet-project.zip -d proj
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+      - name: build overlay apk
+        run: gradle -p proj/overlay-app assembleDebug --no-daemon
+      - name: embed apk
+        run: |
+          cp proj/overlay-app/app/build/outputs/apk/debug/app-debug.apk proj/native/overlay.apk
+          python3 - <<'PY'
+          d = open('proj/native/overlay.apk', 'rb').read()
+          body = ','.join(str(b) for b in d)
+          open('proj/native/apk_data.h', 'w').write(
+              'static const unsigned char overlay_apk[] = {%s};\nstatic const unsigned overlay_apk_len = %d;\n' % (body, len(d)))
+          PY
+      - name: build native arm64
+        run: |
+          BIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+          $BIN/aarch64-linux-android26-clang++ -O2 -std=c++17 -static-libstdc++ -Iproj/native -o scarlet proj/native/cheat.cpp
+          $BIN/llvm-strip scarlet
+          ls -l scarlet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scarlet
+          path: scarlet
